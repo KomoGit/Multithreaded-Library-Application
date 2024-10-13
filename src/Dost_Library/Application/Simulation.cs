@@ -7,6 +7,7 @@ namespace Dost_Library.Application
         private readonly int _maxSeats;
         private readonly List<Seat> _seats;
         private readonly List<Task> _tasks = [];
+        private readonly object _lock = new();
 
         public Simulation(int maxSeats)
         {
@@ -18,69 +19,83 @@ namespace Dost_Library.Application
         {
             foreach (var student in students)
             {
-                var task = Task.Run(() => SeatStudent(student));
+                // Create a task to seat each student and add it to the task list
+                var task = Task.Run(() => SeatStudent(student)); 
                 _tasks.Add(task);
             }
         }
 
-        private void SeatStudent(Student student)
+        public void WaitForAll()
         {
-            var assignedSeat = _seats.FirstOrDefault(seat => seat.IsOccupied && seat.CurrentBookId == student.BookId);
+            Task.WhenAll(_tasks).Wait();
+        }
+
+        private Task SeatStudent(Student student)
+        {
+            Seat assignedSeat;
+            // Lock the seat selection and assignment to ensure that only one student can occupy a seat at a time
+            lock (_lock)
+            {
+                // Check if there's a seat already occupied by a student reading the same book
+                assignedSeat = _seats.FirstOrDefault(seat => seat.IsOccupied && seat.CurrentBookId == student.BookId);
+
+                if (assignedSeat != null)
+                {
+                    Console.WriteLine($"{student.Name} is queued for Seat {assignedSeat.SeatNumber} to read {student.Book.Name}");
+                    assignedSeat.WaitingQueue.Enqueue(student);
+                    return Task.CompletedTask; // Exit once queued, no further task to track here
+                }
+
+                // Find an available seat if none are reading the same book
+                assignedSeat = _seats.FirstOrDefault(seat => !seat.IsOccupied);
+
+                if (assignedSeat != null)
+                {
+                    assignedSeat.IsOccupied = true;
+                    assignedSeat.CurrentBookId = student.BookId;
+                    Console.WriteLine($"{student.Name} is seated at Seat {assignedSeat.SeatNumber} to read {student.Book.Name}");
+                }
+            }
 
             if (assignedSeat != null)
             {
-                Console.WriteLine($"{student.Name} is queued for Seat {assignedSeat.SeatNumber} to read {student.Book.Name}");
-                assignedSeat.WaitingQueue.Enqueue(student);
+                return ReadBookInSeat(assignedSeat, student); // Return the task from reading the book
             }
             else
             {
-                // Find an available seat if none are reading the same book
-                var availableSeat = _seats.FirstOrDefault(seat => !seat.IsOccupied);
-
-                if (availableSeat != null)
-                {
-                    // Occupy the seat with the student
-                    availableSeat.IsOccupied = true;
-                    availableSeat.CurrentBookId = student.BookId;
-                    Console.WriteLine($"{student.Name} is seated at Seat {availableSeat.SeatNumber} to read {student.Book.Name}");
-                    ReadBookInSeat(availableSeat, student);
-                }
-                else
-                {
-                    Console.WriteLine($"{student.Name} is waiting for an available seat.");
-                    Thread.Sleep(1000); // Simulate waiting
-                    SeatStudent(student); 
-                }
+                // Use Task.Delay to simulate waiting without blocking the thread and return the task
+                Console.WriteLine($"{student.Name} is waiting for an available seat.");
+                return Task.Delay(1000).ContinueWith(t => SeatStudent(student)); // Reattempt seating after delay
             }
         }
 
-        private void ReadBookInSeat(Seat seat, Student student)
+        private Task ReadBookInSeat(Seat seat, Student student)
         {
             Console.WriteLine($"{student.Name} is reading {student.Book.Name} at Seat {seat.SeatNumber} for {student.TimeItTakesToRead} ms");
-            Thread.Sleep(student.TimeItTakesToRead); // Simulate the time it takes to read the book
-            Console.WriteLine($"{student.Name} has finished reading {student.Book.Name} at Seat {seat.SeatNumber}");
 
-            lock (_seats)
+            // Use Task.Delay to simulate the reading process and chain the continuation properly
+            return Task.Delay(student.TimeItTakesToRead).ContinueWith(_ =>
             {
-                // Check if there are stude   nts waiting for this seat
-                if (seat.WaitingQueue.TryDequeue(out var nextStudent))
-                {
-                    Console.WriteLine($"{nextStudent.Name} is now seated at Seat {seat.SeatNumber} to read {nextStudent.Book.Name}");
-                    ReadBookInSeat(seat, nextStudent); // Let the next student read
-                }
-                else
-                {
-                    // Free the seat if no one is waiting
-                    Console.WriteLine($"Seat {seat.SeatNumber} is now free.");
-                    seat.IsOccupied = false;
-                    seat.CurrentBookId = 0;
-                }
-            }
-        }
+                Console.WriteLine($"{student.Name} has finished reading {student.Book.Name} at Seat {seat.SeatNumber}");
 
-        public void WaitForAll() 
-        {
-            Task.WaitAll([.. _tasks]);
+                lock (_lock)
+                {
+                    // Check if there are students waiting for this seat
+                    if (seat.WaitingQueue.TryDequeue(out var nextStudent))
+                    {
+                        Console.WriteLine($"{nextStudent.Name} is now seated at Seat {seat.SeatNumber} to read {nextStudent.Book.Name}");
+                        return ReadBookInSeat(seat, nextStudent);
+                    }
+                    else
+                    {
+                        // Free the seat if no one is waiting
+                        Console.WriteLine($"Seat {seat.SeatNumber} is now free.");
+                        seat.IsOccupied = false;
+                        seat.CurrentBookId = 0;
+                        return Task.CompletedTask; // No more tasks to run
+                    }
+                }
+            }).Unwrap();
         }
-    } 
+    }
 }

@@ -5,13 +5,15 @@ namespace Dost_Library.Application
     internal class Simulation
     {
         private readonly int _maxSeats;
+        private readonly int _booksAvailableForReading;
         private readonly List<Seat> _seats;
         private readonly List<Task> _tasks = [];
         private readonly object _lock = new();
 
-        public Simulation(int maxSeats)
+        public Simulation(int maxSeats, int books)
         {
             _maxSeats = maxSeats;
+            _booksAvailableForReading = books;
             _seats = Enumerable.Range(1, _maxSeats).Select(i => new Seat(i)).ToList();
         }
 
@@ -37,7 +39,15 @@ namespace Dost_Library.Application
             lock (_lock)
             {
                 // Check if there's a seat already occupied by a student reading the same book
-                assignedSeat = _seats.FirstOrDefault(seat => seat.IsOccupied && seat.CurrentBookId == student.BookId);
+                // Authors Note:
+                // Why did I do this? Although this is simulated, it would be resonable to think that we can cache the book
+                // That this book can be cached once for multiple continious readers rather than diposed of and brought back from database continously.
+                // Though this does create a bottleneck if the seat number is low, I think it is worth it when it comes to saving database costs (especially if we are using one hosted in AWS)
+
+                if(_booksAvailableForReading <= _seats.Count) //There is (more than) enough seats for each book.
+                    assignedSeat = _seats.FirstOrDefault(seat => seat.IsOccupied && seat.CurrentBookId == student.BookId);
+                else 
+                    assignedSeat = _seats.FirstOrDefault(seat => seat.IsOccupied);
 
                 if (assignedSeat != null)
                 {
@@ -63,7 +73,6 @@ namespace Dost_Library.Application
             }
             else
             {
-                // Use Task.Delay to simulate waiting without blocking the thread and return the task
                 Console.WriteLine($"{student.Name} is waiting for an available seat.");
                 return Task.Delay(1000).ContinueWith(t => SeatStudent(student)); // Reattempt seating after delay
             }

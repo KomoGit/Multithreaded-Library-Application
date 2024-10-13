@@ -40,7 +40,8 @@ using (var context = new AppDbContext())
         .OrderBy(x => x.BookId) //Was in reverse previously.
         .ThenBy(x => x.TimeItTakesToRead);
 
-    var sim = new Simulation(maxSeats: seatCount);
+    var books = context.Books.Count();
+    var sim = new Simulation(maxSeats: seatCount, books: books);
     sim.StartSimulation(data);
     sim.WaitForAll();
 }

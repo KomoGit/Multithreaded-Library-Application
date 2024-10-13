@@ -45,4 +45,5 @@ using (var context = new AppDbContext())
     sim.WaitForAll();
 }
 sw.Stop();
-Console.WriteLine($"{sw} seconds.");
+Console.ForegroundColor = ConsoleColor.Red;
+Console.WriteLine($"Finished: {sw} seconds.");
